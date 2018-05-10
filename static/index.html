@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,900" rel="stylesheet">
+
+    <title>Redis IoT Demo</title>
+  </head>
+  <body>
+    <style>
+      html {
+        font-family: 'Lato', sans-serif;
+        background: url(/images/bg-poly-white-1.jpg)  no-repeat center center fixed;
+        background-size: cover;
+      }
+      .wrapper {
+        height: 504px;
+        width:960px;
+        background-color: white;
+      }
+      
+      .line {
+        stroke: #b62411;
+        stroke-width: 2px;
+        fill: transparent
+      }
+      .axis text {
+        fill: #354553;
+        font-weight: 300;
+      }
+      
+      .axis path,
+      .axis line {
+        fill: transparent;
+        stroke: #7f7f7f;
+        shape-rendering: crispEdges;
+      }
+      
+      .x,
+      .y {
+        font-family: 'Lato', sans-serif;
+        font-size:11px;
+        font-weight: bold;
+      }
+      .container,
+      .wrapper {
+        width:960px;
+      }
+      .container {
+
+        margin: 0 auto;
+      }
+    </style>
+    <div class="container">
+      <h1>Redis IoT with Streams</h1>
+      <div class='wrapper'></div> 
+    </div>
+     
+    <script>
+      //based on http://bl.ocks.org/386er/79beb37ca515510e224bc2d108432586
+      //modified for demo and updated to D3 v4
+      var 
+        fixedDomain = [-50, 50],
+        n = 80,
+        data = d3.range(n).map(function(i) {return  0; }),
+        dataMin = fixedDomain[0],
+        dataMax = fixedDomain[1],
+        currentHeight = 0,
+        margin = {top: 30, right: 20, bottom: 30, left: 40},
+        width,
+        height,
+        svg,
+        x,
+        y,
+        line,
+        path,
+        duration = 500,
+        now = new Date(Date.now() - duration),
+        transition,
+        count = 0,
+        axisX,
+        axisY,
+        xLine,
+        tickL,
+        socket,
+        determineWidthAndHeight = function() {
+          width = 960 - margin.left - margin.right,
+          height = 504 - margin.top - margin.bottom;
+        },
+        createXScale = function() {
+          xLine = d3.scaleLinear()
+            .domain([0, n - 1])
+            .range([0, width]);	
+      
+          x = d3.scaleTime()
+            .domain([now - (n - 2) * duration, now - duration])
+            .range([0, width]);
+      
+        }
+        updateDomains = function() {
+          now = new Date();
+          x.domain([now - (n - 2) * duration, now - duration]);
+          y.domain(fixedDomain);
+        },
+        updateAxes = function() {
+          axisX.attr("transform", "translate(0," + y(0) + ")")
+          axisX.call(x.axis);
+          axisY.call(y.axis);		
+        },
+        createYScale = function() {
+          y = d3.scaleLinear()
+            .domain(fixedDomain)
+            .range([height,0]);
+        }
+        crateScales = function() {
+          createYScale();
+          createXScale();
+        },
+        createSVG = function() {
+          svg = d3.select(".wrapper").append("svg").attr('class','svg')
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+        },
+        createLine = function() {
+          line = d3.line()
+            .x(function(d, i) { return xLine(i); })
+            .y(function(d, i) { return y(d); });
+          line.curve(d3.curveMonotoneX);
+        },
+        createXAxis = function() {
+          axisX = svg.append("g")
+            .attr("class", "x axis")
+            .attr("transform", "translate(0," + y(0) + ")")
+            .call(
+              x.axis = d3.axisBottom(x).ticks(15).tickFormat( d3.timeFormat("%H:%M:%S") )
+            )
+          },
+          createYAxis = function() {
+            axisY = svg.append("g")
+              .attr("class", "y axis")
+              .call(
+                y.axis = d3.axisLeft(y).ticks(20)
+              )
+          },
+          appendAxis = function() {
+            createXAxis();
+            createYAxis();	
+          },
+          applyPathMagic = function() {
+            svg.append("defs").append("clipPath")
+              .attr("id", "clip")
+              .append("rect")
+              .attr("width", width)
+              .attr("height", height);
+            path = svg.append("g")
+              .attr("clip-path", "url(#clip)")
+              .append("path")
+              .datum(data)
+              .attr("class", "line")
+              .attr("d", line);	
+          },
+          render = function() {
+            determineWidthAndHeight();
+            crateScales();
+            createSVG();
+            createLine();
+            appendAxis();
+            applyPathMagic();		
+          };
+    
+    
+      transition = d3.select({}).transition()
+        .duration(duration)
+        .ease(d3.easeLinear);
+    
+    
+    
+      tick = function() {
+        transition.each(function() {
+          path.attr("d", line)
+            .attr("transform", null)
+            .transition()
+            .ease(d3.easeLinear)
+            .duration(duration)
+            .attr("transform", "translate(" + xLine(-1) + ",0)")
+    
+          svg.select(".line")
+            .attr("d", line)
+            .attr("transform", null);
+    
+          updateDomains();
+          updateAxes();
+    
+          path.transition()
+            .attr("transform", "translate(" + x(now - (n - 1) * duration) + ")");
+    
+          data.shift();
+        });
+      };
+    
+    
+      render();
+      
+
+      socket = new WebSocket('ws://localhost:4379/temperature');
+      socket.onopen = function () {
+        socket.onmessage = function(event) {
+          let eventParts = JSON.parse(event.data).split(':');
+    
+          data.push(Number(eventParts[1]));
+          tick();
+        };
+      }; 
+       
+        
+      
+    </script>
+</body>
+</html>
+
